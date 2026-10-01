@@ -18,3 +18,5 @@ RUN bun run build
 EXPOSE 3131
 
 CMD ["sh", "-c", "if [ ! -f \"$GBRAIN_HOME/.gbrain/config.json\" ]; then ./bin/gbrain init --non-interactive --no-embedding --db-only; fi; exec ./bin/gbrain serve --http --bind 0.0.0.0 --port 3131 --public-url \"https://$RAILWAY_PUBLIC_DOMAIN\" --suppress-bootstrap-token"]
+
+RUN ln -s /app/bin/gbrain /usr/local/bin/gbrain
