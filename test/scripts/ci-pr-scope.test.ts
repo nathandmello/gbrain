@@ -42,10 +42,10 @@ function classify(files: string): string {
 describe('pull-request CI scope', () => {
   test('pushes, schedules and manual runs keep every Bun version on every native target', () => {
     const full = nativeCells('full');
-    expect(full.native).toHaveLength(18);
-    expect(full.musl).toHaveLength(6);
-    expect(full.console).toHaveLength(6);
-    expect(full.dotnet).toHaveLength(6);
+    expect(full.native).toHaveLength(12);
+    expect(full.musl).toHaveLength(4);
+    expect(full.console).toHaveLength(4);
+    expect(full.dotnet).toHaveLength(4);
     expect(full.openclaw).toBe(true);
   });
 
@@ -71,19 +71,27 @@ describe('pull-request CI scope', () => {
       expect(classify(`README.md\n${path}\n`), path).toBe('primary');
     }
     expect(classify('')).toBe('primary');
+    const large = Array.from({ length: 8000 }, (_, i) => `docs/guides/fixture-${i}-${'x'.repeat(72)}.md`);
+    expect(Buffer.byteLength(large.join('\n'))).toBeGreaterThan(64 * 1024);
+    expect(classify(large.join('\n'))).toBe('smoke');
+    for (const at of [0, large.length >> 1, large.length]) {
+      const files = [...large];
+      files.splice(at, 0, 'src/core/pglite-lock.ts');
+      expect(classify(files.join('\n')), `native marker at ${at}`).toBe('primary');
+    }
   });
 
   test('the planning job runs the full matrix off pull requests and never narrows on an unreadable diff', () => {
     const step = load('test.yml').jobs.changes.steps!.find(entry => entry.id === 'scope')!;
     const dir = mkdtempSync(join(tmpdir(), 'gbrain-ci-scope-'));
     try {
-      const run = (event: string, gh: string) => {
+      const run = (event: string, gh: string, changedFiles = '1') => {
         writeFileSync(join(dir, 'gh'), `#!/usr/bin/env bash\n${gh}\n`);
         chmodSync(join(dir, 'gh'), 0o755);
         const output = join(dir, 'out');
         writeFileSync(output, '');
         const result = spawnSync('bash', ['-c', step.run!], { cwd: root, encoding: 'utf8',
-          env: { PATH: `${dir}:${process.env.PATH}`, EVENT: event, PR: '7', REPO: 'example/repo', GITHUB_OUTPUT: output } });
+          env: { PATH: `${dir}:${process.env.PATH}`, EVENT: event, PR: '7', REPO: 'example/repo', CHANGED_FILES: changedFiles, GITHUB_OUTPUT: output } });
         expect(result.status, result.stderr).toBe(0);
         return readFileSync(output, 'utf8').trim();
       };
@@ -93,6 +101,20 @@ describe('pull-request CI scope', () => {
       expect(run('pull_request', 'exit 1')).toBe('native=primary');
       expect(run('pull_request', "printf 'docs/a.md\\n'")).toBe('native=smoke');
       expect(run('pull_request', "printf 'src/core/pglite-lock.ts\\n'")).toBe('native=primary');
+      for (const count of ['', 'invalid', '3000', '4230', '99999']) {
+        expect(run('pull_request', "printf 'docs/a.md\\n'", count), count).toBe('native=primary');
+      }
+      // Even below the API cap, an incomplete or overlong successful response
+      // is unknown. A complete large docs-only response can still use smoke.
+      expect(run('pull_request', "printf 'docs/a.md\\n'", '2')).toBe('native=primary');
+      expect(run('pull_request', "printf 'docs/a.md\\ndocs/b.md\\n'", '1')).toBe('native=primary');
+      const fixture = join(dir, 'paths');
+      const docs = Array.from({ length: 2999 }, (_, i) => `docs/guides/fixture-${i}-${'x'.repeat(72)}.md`);
+      writeFileSync(fixture, docs.join('\n'));
+      expect(run('pull_request', `cat '${fixture}'`, '2999')).toBe('native=smoke');
+      docs[0] = 'src/core/pglite-lock.ts';
+      writeFileSync(fixture, docs.join('\n'));
+      expect(run('pull_request', `cat '${fixture}'`, '2999')).toBe('native=primary');
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
@@ -106,7 +128,7 @@ describe('pull-request CI scope', () => {
     for (const name of ['read-performance', 'deployment-matrix', 'invariants', 'reconciliation']) {
       const full = cells(persistence[name], push);
       const primary = cells(persistence[name], pr);
-      expect(full.filter(cell => cell.endsWith('1.3.11')).length, name).toBe(full.length / 2);
+      expect(full.filter(cell => cell.endsWith(MINIMUM_BUN_VERSION)).length, name).toBe(full.length / 2);
       expect(primary, name).toEqual(full.filter(cell => cell.endsWith('1.4.2')));
     }
   });
@@ -139,7 +161,7 @@ describe('pull-request CI scope', () => {
     expect(matrices).toHaveLength(5);
     for (const bun of matrices) expect(bun).toEqual([MINIMUM_BUN_VERSION, primary]);
     for (const job of ['native', 'musl', 'windows-backup-console', 'windows-backup-dotnet']) {
-      expect(native[job].strategy!.matrix.bun as string[]).toEqual(expect.arrayContaining([MINIMUM_BUN_VERSION, primary]));
+      expect(native[job].strategy!.matrix.bun).toEqual([MINIMUM_BUN_VERSION, primary]);
     }
   });
 });
