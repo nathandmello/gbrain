@@ -78,11 +78,11 @@ echo "[cron] Syncing $SOURCE"
 #
 # Catch any chunks that weren't embedded inline during sync.
 #
-echo "[cron] Embedding stale chunks"
+echo "[cron] Syncing $SOURCE"
 
-"$GBRAIN" embed \
-  --stale \
+"$GBRAIN" sync \
   --source "$SOURCE" \
-  --json
+  --json \
+  --timeout 1500
 
 echo "[cron] GBrain sync complete"
